@@ -35,12 +35,6 @@ def parse_args():
         help="Nombre de tranches égales (défaut: 5)."
     )
     parser.add_argument(
-        "-f", "--fill",
-        choices=["t", "w", "b"],
-        default="t",
-        help="Fond hors tranche: t=transparent (défaut), w=white, b=black."
-    )
-    parser.add_argument(
         "-o", "--output_dir",
         type=Path,
         default=None,

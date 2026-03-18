@@ -94,23 +94,33 @@ def make_mask(depth: np.ndarray, low: int, high: int) -> np.ndarray:
 # Étape 4 — Découpage
 # ──────────────────────────────────────────────
 
-def apply_mask(img: Image.Image, mask: np.ndarray, fill: str = "transparent") -> Image.Image:
-    """Applique le masque sur l'image RGBA.
-
-    fill="transparent" : pixels hors tranche → transparents
-    fill="white"       : pixels hors tranche → blanc opaque
-    fill="black"       : pixels hors tranche → noir opaque
+def apply_mask(img: Image.Image, mask: np.ndarray) -> Image.Image:
+    """Applique le masque sur l'image RGBA : les pixels hors tranche deviennent transparents.
 
     Returns:
-        Nouvelle PIL.Image RGBA.
+        Nouvelle PIL.Image RGBA avec le canal alpha remplacé par le masque.
     """
-    if fill == "t":
-        layer = img.copy()
-        layer.putalpha(Image.fromarray(mask))
-        return layer
-    color = (255, 255, 255, 255) if fill == "w" else (0, 0, 0, 255)
-    result = Image.new("RGBA", img.size, color)
-    result.paste(img, mask=Image.fromarray(mask))
+    layer = img.copy()
+    layer.putalpha(Image.fromarray(mask))
+    return layer
+
+
+def apply_cumulative_layer(img: Image.Image, depth: np.ndarray, slices: list, i: int) -> Image.Image:
+    """Pour le mode cumulatif, chaque calque montre uniquement la bande nouvellement révélée :
+
+    - pixels déjà visibles (tranches précédentes) → transparents
+    - pixels de la nouvelle bande                 → image normale
+    - pixels pas encore révélés (tranches suivantes) → noir opaque
+    """
+    _, hi = slices[i]
+    prev_hi = slices[i - 1][1] if i > 0 else -1
+
+    new_mask    = ((depth > prev_hi) & (depth <= hi)).astype(np.uint8) * 255
+    future_mask = (depth > hi).astype(np.uint8) * 255
+
+    result = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    result.paste(Image.new("RGBA", img.size, (0, 0, 0, 255)), mask=Image.fromarray(future_mask))
+    result.paste(img, mask=Image.fromarray(new_mask))
     return result
 
 
@@ -167,7 +177,10 @@ def run(args):
     img, depth, icc_profile = load_images(args.image, args.depth)
     slices = make_slices(args.slices, cumulative=(args.mode == 2))
     masks = [make_mask(depth, lo, hi) for lo, hi in slices]
-    layers = [apply_mask(img, mask, args.fill) for mask in masks]
+    if args.mode == 2:
+        layers = [apply_cumulative_layer(img, depth, slices, i) for i in range(len(slices))]
+    else:
+        layers = [apply_mask(img, mask) for mask in masks]
     output_dir = args.output_dir or Path(args.image).parent / "output"
     save_layers(layers, slices, output_dir, icc_profile)
     save_masks(masks, slices, output_dir)
