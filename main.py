@@ -27,7 +27,9 @@ def load_images(image_path: Path, depth_path: Path):
             sys.exit(1)
 
     try:
-        img = Image.open(image_path).convert("RGBA")
+        raw = Image.open(image_path)
+        icc_profile = raw.info.get("icc_profile")
+        img = raw.convert("RGBA")
     except UnidentifiedImageError:
         logger.error("Impossible de lire l'image : %s", image_path)
         sys.exit(1)
@@ -42,11 +44,13 @@ def load_images(image_path: Path, depth_path: Path):
         logger.warning("Tailles différentes — redimensionnement depth map %s → %s", depth.size, img.size)
         depth = depth.resize(img.size, Image.LANCZOS)
 
+    if icc_profile:
+        logger.info("Profil ICC détecté (%d octets)", len(icc_profile))
     logger.info("Image chargée    : %s  %s", img.size, img.mode)
     logger.info("Depth map chargée: %s  min=%d  max=%d",
                 depth.size, np.array(depth).min(), np.array(depth).max())
 
-    return img, np.array(depth)
+    return img, np.array(depth), icc_profile
 
 
 # ──────────────────────────────────────────────
@@ -105,15 +109,16 @@ def apply_mask(img: Image.Image, mask: np.ndarray) -> Image.Image:
 # Étape 5 — Sauvegarde
 # ──────────────────────────────────────────────
 
-def save_layers(layers: list, slices: list[tuple[int, int]], output_dir: Path):
-    """Sauvegarde chaque couche découpée en PNG (avec transparence).
+def save_layers(layers: list, slices: list[tuple[int, int]], output_dir: Path, icc_profile: bytes = None):
+    """Sauvegarde chaque couche découpée en PNG (avec transparence et profil ICC).
 
     Nommage : layer_0_0-50.png, layer_1_51-102.png, ...
     """
     output_dir.mkdir(parents=True, exist_ok=True)
+    save_kwargs = {"icc_profile": icc_profile} if icc_profile else {}
     for i, (layer, (lo, hi)) in enumerate(zip(layers, slices)):
         path = output_dir / f"layer_{i}_{lo}-{hi}.png"
-        layer.save(path)
+        layer.save(path, **save_kwargs)
         logger.info("Sauvegardé : %s", path)
 
 
@@ -150,12 +155,12 @@ def save_recap(layers: list, slices: list[tuple[int, int]], output_dir: Path, im
 
 
 def run(args):
-    img, depth = load_images(args.image, args.depth)
+    img, depth, icc_profile = load_images(args.image, args.depth)
     slices = make_slices(args.slices, cumulative=(args.mode == 2))
     masks = [make_mask(depth, lo, hi) for lo, hi in slices]
     layers = [apply_mask(img, mask) for mask in masks]
     output_dir = args.output_dir or Path(args.image).parent / "output"
-    save_layers(layers, slices, output_dir)
+    save_layers(layers, slices, output_dir, icc_profile)
     save_masks(masks, slices, output_dir)
     if args.recap:
         save_recap(layers, slices, output_dir, img.size)
