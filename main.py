@@ -1,7 +1,8 @@
 import logging
+import sys
 import numpy as np
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageDraw, UnidentifiedImageError
 
 from cli import parse_args
 
@@ -13,15 +14,29 @@ logger = logging.getLogger(__name__)
 # Étape 1 — Chargement
 # ──────────────────────────────────────────────
 
-def load_images(image_path: str, depth_path: str):
+def load_images(image_path: Path, depth_path: Path):
     """Charge l'image originale et la carte de profondeur.
 
     Returns:
         img   : PIL.Image en mode RGBA
         depth : np.ndarray 2D uint8, valeurs 0-255
     """
-    img = Image.open(image_path).convert("RGBA")
-    depth = Image.open(depth_path).convert("L")  # niveaux de gris 0-255
+    for path, label in [(image_path, "image"), (depth_path, "depth map")]:
+        if not Path(path).exists():
+            logger.error("Fichier introuvable (%s) : %s", label, path)
+            sys.exit(1)
+
+    try:
+        img = Image.open(image_path).convert("RGBA")
+    except UnidentifiedImageError:
+        logger.error("Impossible de lire l'image : %s", image_path)
+        sys.exit(1)
+
+    try:
+        depth = Image.open(depth_path).convert("L")
+    except UnidentifiedImageError:
+        logger.error("Impossible de lire la depth map : %s", depth_path)
+        sys.exit(1)
 
     if img.size != depth.size:
         logger.warning("Tailles différentes — redimensionnement depth map %s → %s", depth.size, img.size)
@@ -38,11 +53,13 @@ def load_images(image_path: str, depth_path: str):
 # Étape 2 — Tranches
 # ──────────────────────────────────────────────
 
-def make_slices(n: int, depth_min: int = 0, depth_max: int = 255) -> list[tuple[int, int]]:
+def make_slices(n: int, depth_min: int = 0, depth_max: int = 255, cumulative: bool = False) -> list[tuple[int, int]]:
     """Découpe [depth_min, depth_max] en N bandes égales.
 
-    Exemple avec n=5 :
+    Mode normal (cumulative=False) :
         [(0, 50), (51, 102), (103, 153), (154, 204), (205, 255)]
+    Mode cumulatif (cumulative=True) :
+        [(0, 50), (0, 102), (0, 153), (0, 204), (0, 255)]
 
     Returns:
         Liste de tuples (borne_basse, borne_haute) incluses.
@@ -50,7 +67,7 @@ def make_slices(n: int, depth_min: int = 0, depth_max: int = 255) -> list[tuple[
     step = (depth_max - depth_min + 1) / n
     slices = []
     for i in range(n):
-        low  = int(depth_min + i * step)
+        low  = depth_min if cumulative else int(depth_min + i * step)
         high = int(depth_min + (i + 1) * step) - 1 if i < n - 1 else depth_max
         slices.append((low, high))
     return slices
@@ -113,19 +130,47 @@ def save_masks(masks: list, slices: list[tuple[int, int]], output_dir: Path):
         logger.info("Masque sauvegardé : %s", path)
 
 
+def save_recap(layers: list, slices: list[tuple[int, int]], output_dir: Path, img_size: tuple):
+    """Génère un récap visuel : toutes les tranches côte à côte sur fond gris.
+
+    Sauvegardé dans output_dir/recap.png.
+    """
+    W, H = img_size
+    LABEL_H = 30
+    recap = Image.new("RGBA", (W * len(layers), H + LABEL_H), (50, 50, 50, 255))
+    draw = ImageDraw.Draw(recap)
+    for i, (layer, (lo, hi)) in enumerate(zip(layers, slices)):
+        preview = Image.new("RGBA", (W, H), (220, 220, 220, 255))
+        preview.paste(layer, mask=layer.split()[3])
+        recap.paste(preview, (i * W, LABEL_H))
+        draw.text((i * W + 5, 5), f"T{i}  [{lo}-{hi}]", fill=(255, 255, 200))
+    path = output_dir / "recap.png"
+    recap.save(path)
+    logger.info("Récap sauvegardé : %s", path)
+
+
 def run(args):
     img, depth = load_images(args.image, args.depth)
-    slices = make_slices(args.slices)
+    slices = make_slices(args.slices, cumulative=(args.mode == 2))
     masks = [make_mask(depth, lo, hi) for lo, hi in slices]
     layers = [apply_mask(img, mask) for mask in masks]
     output_dir = args.output_dir or Path(args.image).parent / "output"
     save_layers(layers, slices, output_dir)
     save_masks(masks, slices, output_dir)
+    if args.recap:
+        save_recap(layers, slices, output_dir, img.size)
 
 
 def main():
     args = parse_args()
-    run(args)
+    try:
+        run(args)
+    except PermissionError as e:
+        logger.error("Permission refusée : %s", e)
+        sys.exit(1)
+    except OSError as e:
+        logger.error("Erreur système : %s", e)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

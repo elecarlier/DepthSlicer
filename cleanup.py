@@ -11,7 +11,7 @@ def clean_input_output(folders=None, exts=None):
             Par défaut [".png", ".jpg", ".jpeg"].
     """
     if folders is None:
-        folders = ["input", "output"]
+        folders = ["input", "test_images/output"]
     if exts is None:
         exts = [".png", ".jpg", ".jpeg"]
 
