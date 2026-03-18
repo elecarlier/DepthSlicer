@@ -5,7 +5,7 @@ from pathlib import Path
 def parse_args():
     """Définition des arguments CLI."""
     parser = argparse.ArgumentParser(
-        description="Modifications sur images lenticulaires (ajout mire, traits de repérage)."
+        description="DepthSlicer — découpe une image par tranches de profondeur."
     )
 
     parser.add_argument(
@@ -18,36 +18,20 @@ def parse_args():
         "-d", "--depth",
         type=Path,
         required=True,
-        help="Chemin de la carte de profondeur."
-    )
-    parser.add_argument(
-        "--mode",
-        type=int,
-        choices=[1, 2],
-        default=1,
-        help=(
-            "Mode 1:"
-            "Mode 2:" \
-        )
+        help="Chemin de la carte de profondeur (image en niveaux de gris)."
     )
     parser.add_argument(
         "-s", "--slices",
-        type=str,
+        type=int,
         default=5,
         metavar="N",
-        help="Nombre de tranches égales"
-    )    
-    parser.add_argument(
-        "-o", "--output",
-        type=str,
-        default=None,
-        help="Nom du fichier de sortie (sans chemin). Par défaut: <image>_mod.png"
+        help="Nombre de tranches égales (défaut: 5)."
     )
     parser.add_argument(
-        "-d", "--output_dir",
+        "-o", "--output_dir",
         type=Path,
         default=None,
         help="Dossier de sortie. Par défaut: même dossier que l'image d'entrée."
     )
- 
+
     return parser.parse_args()
