@@ -94,15 +94,24 @@ def make_mask(depth: np.ndarray, low: int, high: int) -> np.ndarray:
 # Étape 4 — Découpage
 # ──────────────────────────────────────────────
 
-def apply_mask(img: Image.Image, mask: np.ndarray) -> Image.Image:
-    """Applique le masque sur l'image RGBA : les pixels hors tranche deviennent transparents.
+def apply_mask(img: Image.Image, mask: np.ndarray, fill: str = "transparent") -> Image.Image:
+    """Applique le masque sur l'image RGBA.
+
+    fill="transparent" : pixels hors tranche → transparents
+    fill="white"       : pixels hors tranche → blanc opaque
+    fill="black"       : pixels hors tranche → noir opaque
 
     Returns:
-        Nouvelle PIL.Image RGBA avec le canal alpha remplacé par le masque.
+        Nouvelle PIL.Image RGBA.
     """
-    layer = img.copy()
-    layer.putalpha(Image.fromarray(mask))
-    return layer
+    if fill == "t":
+        layer = img.copy()
+        layer.putalpha(Image.fromarray(mask))
+        return layer
+    color = (255, 255, 255, 255) if fill == "w" else (0, 0, 0, 255)
+    result = Image.new("RGBA", img.size, color)
+    result.paste(img, mask=Image.fromarray(mask))
+    return result
 
 
 # ──────────────────────────────────────────────
@@ -158,7 +167,7 @@ def run(args):
     img, depth, icc_profile = load_images(args.image, args.depth)
     slices = make_slices(args.slices, cumulative=(args.mode == 2))
     masks = [make_mask(depth, lo, hi) for lo, hi in slices]
-    layers = [apply_mask(img, mask) for mask in masks]
+    layers = [apply_mask(img, mask, args.fill) for mask in masks]
     output_dir = args.output_dir or Path(args.image).parent / "output"
     save_layers(layers, slices, output_dir, icc_profile)
     save_masks(masks, slices, output_dir)
